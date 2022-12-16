@@ -16,7 +16,10 @@ class MyApp extends RemasteredWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(
+        key: ValueKey('mypage'),
+        title: 'Flutter Demo Home Page',
+      ),
     );
   }
 }
@@ -28,6 +31,7 @@ class MyHomePage extends RemasteredWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localCounter = reactable(() => 0);
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -40,11 +44,19 @@ class MyHomePage extends RemasteredWidget {
               'You have pushed the button this many times:',
             ),
             Text(
-              '$counter',
+              'local $localCounter',
+              style: Theme.of(context).textTheme.headline4,
+            ),
+            Text(
+              'simple $counter',
               style: Theme.of(context).textTheme.headline4,
             ),
             Text(
               'doubled $doubled',
+              style: Theme.of(context).textTheme.headline4,
+            ),
+            Text(
+              'nested $nested',
               style: Theme.of(context).textTheme.headline4,
             ),
             const DebouncedCounter(),
@@ -56,6 +68,7 @@ class MyHomePage extends RemasteredWidget {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           counter.value++;
+          localCounter.value += 8;
         },
         tooltip: 'Increment',
         child: const Icon(Icons.add),
@@ -71,6 +84,8 @@ final counter = reactable(
 final doubled = reactable(
   () => counter.value * 2,
 );
+
+final nested = reactable(() => counter.value + doubled.value);
 
 class DebouncedCounter extends RemasteredWidget {
   const DebouncedCounter({super.key});

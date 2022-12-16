@@ -160,15 +160,17 @@ abstract class RemasteredWidget extends StatefulWidget {
 
 class RemasteredState extends State<RemasteredWidget> {
   static var _currentReactables = <Reactable>[];
+  static var _currentLocalReactables = <Reactable>[];
   static var _currentDisposables = <OnDispose>[];
   static var _currentCancelables = <OnDispose>[];
-  static var _currentReactableIndex = 0;
+  static var _currentLocalReactableIndex = 0;
   static var _currentDisposableIndex = 0;
   static var _currentCancelableIndex = 0;
   static var _currentIsFirstBuild = true;
   static BuildContext? _currentContext;
 
   final _reactables = <Reactable>[];
+  final _localReactables = <Reactable>[];
   final _disposables = <OnDispose>[];
   final _cancelables = <OnDispose>[];
   var _isFirstBuild = true;
@@ -176,56 +178,106 @@ class RemasteredState extends State<RemasteredWidget> {
   @mustCallSuper
   @override
   void dispose() {
-    for (var element in _disposables) {
+    for (final element in _disposables) {
       element._onDispose?.call();
       element.value.dispose();
     }
     _disposables.clear();
-    for (var element in _cancelables) {
+
+    for (final element in _cancelables) {
       element._onDispose?.call();
       element.value.cancel();
     }
     _cancelables.clear();
-    for (var element in _reactables) {
+
+    for (final element in _reactables) {
       element._elements.remove(context as Element);
       element._dispose();
     }
     _reactables.clear();
+
+    for (final element in _localReactables) {
+      element._elements.remove(context as Element);
+      element._dispose();
+    }
+    _localReactables.clear();
+
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    return _lockState(() {
+      final newWidgetFuture = widget.build(context);
+      final newWidgetStream = widget.emit(context);
+
+      assert(
+        // ignore: unrelated_type_equality_checks
+        newWidgetStream != newWidgetFuture,
+        'You should override build or emit method',
+      );
+
+      if (newWidgetFuture is Widget) {
+        return newWidgetFuture;
+      }
+
+      if (newWidgetFuture is Future) {
+        return FutureBuilder(
+          builder: (context, future) {
+            if (future.hasData) {
+              return future.data as Widget;
+            }
+            if (future.hasError) {
+              return widget.onError(context, future.error);
+            }
+            return widget.onLoading(context);
+          },
+          future: newWidgetFuture,
+        );
+      }
+      return StreamBuilder(
+        builder: (context, snapshot) {
+          if (snapshot.hasData) {
+            return snapshot.data as Widget;
+          }
+          if (snapshot.hasError) {
+            return widget.onError(context, snapshot.error);
+          }
+          return widget.onLoading(context);
+        },
+        stream: newWidgetStream as Stream<Widget>,
+      );
+    });
+  }
+
+  T _lockState<T>(T Function() callback) {
     final previousReactables = _currentReactables;
+    final previousLocalReactables = _currentLocalReactables;
     final previousDisposables = _currentDisposables;
     final previousCancelables = _currentCancelables;
-    final previousReactableIndex = _currentReactableIndex;
+    final previousReactableIndex = _currentLocalReactableIndex;
     final previousDisposableIndex = _currentDisposableIndex;
     final previousCancelableIndex = _currentCancelableIndex;
     final previousIsFirstBuild = _currentIsFirstBuild;
     final previousContext = _currentContext;
 
     _currentReactables = _reactables;
+    _currentLocalReactables = _localReactables;
     _currentDisposables = _disposables;
     _currentCancelables = _cancelables;
-    _currentReactableIndex = 0;
+    _currentLocalReactableIndex = 0;
     _currentDisposableIndex = 0;
     _currentCancelableIndex = 0;
     _currentIsFirstBuild = _isFirstBuild;
     _currentContext = context;
 
-    final newWidgetFuture = widget.build(context);
-    final newWidgetStream = widget.emit(context);
+    final result = callback();
 
-    assert(
-      // ignore: unrelated_type_equality_checks
-      newWidgetStream != newWidgetFuture,
-      'You should override build or emit method',
-    );
     _currentReactables = previousReactables;
+    _currentLocalReactables = previousLocalReactables;
     _currentDisposables = previousDisposables;
     _currentCancelables = previousCancelables;
-    _currentReactableIndex = previousReactableIndex;
+    _currentLocalReactableIndex = previousReactableIndex;
     _currentDisposableIndex = previousDisposableIndex;
     _currentCancelableIndex = previousCancelableIndex;
     _currentIsFirstBuild = previousIsFirstBuild;
@@ -233,36 +285,7 @@ class RemasteredState extends State<RemasteredWidget> {
 
     _isFirstBuild = false;
 
-    if (newWidgetFuture is Widget) {
-      return newWidgetFuture;
-    }
-
-    if (newWidgetFuture is Future) {
-      return FutureBuilder(
-        builder: (context, future) {
-          if (future.hasData) {
-            return future.data as Widget;
-          }
-          if (future.hasError) {
-            return widget.onError(context, future.error);
-          }
-          return widget.onLoading(context);
-        },
-        future: newWidgetFuture,
-      );
-    }
-    return StreamBuilder(
-      builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          return snapshot.data as Widget;
-        }
-        if (snapshot.hasError) {
-          return widget.onError(context, snapshot.error);
-        }
-        return widget.onLoading(context);
-      },
-      stream: newWidgetStream as Stream<Widget>,
-    );
+    return result;
   }
 }
 
@@ -390,11 +413,35 @@ Reactable<T> reactable<T>(
   void Function(T lastValue)? onDispose,
   void Function(T firstValue)? onFirstBuild,
 }) {
+  if (RemasteredState._currentContext != null) {
+    return _localReactable(
+      builder,
+      onDispose: onDispose,
+      onFirstBuild: onFirstBuild,
+    );
+  }
   return Reactable(
     builder,
     onDispose: onDispose,
     onFirstBuild: onFirstBuild,
   );
+}
+
+Reactable<T> _localReactable<T>(
+  T Function() builder, {
+  void Function(T lastValue)? onDispose,
+  void Function(T firstValue)? onFirstBuild,
+}) {
+  if (RemasteredState._currentIsFirstBuild) {
+    final reactable = Reactable(
+      builder,
+      onDispose: onDispose,
+      onFirstBuild: onFirstBuild,
+    );
+    RemasteredState._currentLocalReactables.add(reactable);
+  }
+  return RemasteredState._currentLocalReactables[
+      RemasteredState._currentLocalReactableIndex++] as Reactable<T>;
 }
 
 T disposable<T>(
