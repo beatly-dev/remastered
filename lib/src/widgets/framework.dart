@@ -7,88 +7,8 @@ import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
 
-class RemasteredBuildOwner extends BuildOwner {
-  RemasteredBuildOwner({super.onBuildScheduled, super.focusManager});
-
-  final _inactiveElements = _RemasteredInactiveElements();
-
-  final _dirtyElements = HashSet<_RemasteredElementBase>();
-
-  @override
-  void scheduleBuildFor(Element element) {
-    super.scheduleBuildFor(element);
-    if (element is _RemasteredElementBase) {
-      _dirtyElements.add(element);
-    }
-  }
-
-  @override
-  void finalizeTree() {
-    super.finalizeTree();
-    _inactiveElements._unmountAll();
-  }
-
-  @override
-  void buildScope(Element context, [VoidCallback? callback]) {
-    super.buildScope(context, callback);
-    _dirtyElements.clear();
-  }
-}
-
-class _RemasteredInactiveElements {
-  final _elements = HashSet<_RemasteredElementBase>();
-
-  void _unmount(Element element) {
-    element.visitChildren((Element child) {
-      _unmount(child);
-    });
-    // TODO: dispose something
-  }
-
-  void _unmountAll() {
-    final elements = _elements.toList()..sort(_RemasteredElementBase._sort);
-    _elements.clear();
-    try {
-      elements.reversed.forEach(_unmount);
-    } finally {
-      assert(_elements.isEmpty);
-    }
-  }
-
-  void add(covariant _RemasteredElementBase element) {
-    _elements.add(element);
-  }
-
-  void remove(covariant _RemasteredElementBase element) {
-    _elements.remove(element);
-  }
-}
-
 mixin _RemasteredElementBase on Element {
   bool activated = false;
-
-  static int _sort(Element a, Element b) {
-    final int diff = a.depth - b.depth;
-    // If depths are not equal, return the difference.
-    if (diff != 0) {
-      return diff;
-    }
-    // If the `dirty` values are not equal, sort with non-dirty elements being
-    // less than dirty elements.
-    final bool isBDirty = b.dirty;
-    if (a.dirty != isBDirty) {
-      return isBDirty ? -1 : 1;
-    }
-    // Otherwise, `depth`s and `dirty`s are equal.
-    return 0;
-  }
-
-  RemasteredBuildOwner get remasteredOwner {
-    if (owner is! RemasteredBuildOwner) {
-      throw 'You should use [RemasteredWidgetsFlutterBinding]';
-    }
-    return owner as RemasteredBuildOwner;
-  }
 
   @override
   void mount(Element? parent, Object? newSlot) {
@@ -116,22 +36,7 @@ mixin _RemasteredElementBase on Element {
 
   @override
   void deactivateChild(Element child) {
-    if (child is _RemasteredElementBase) {
-      remasteredOwner._inactiveElements.add(child);
-    }
     super.deactivateChild(child);
-  }
-
-  @override
-  Element inflateWidget(Widget newWidget, Object? newSlot) {
-    final Key? key = newWidget.key;
-    final newChild = super.inflateWidget(newWidget, newSlot);
-    if (key is GlobalKey &&
-        key.currentContext == newChild &&
-        newChild is _RemasteredElementBase) {
-      remasteredOwner._inactiveElements.remove(newChild);
-    }
-    return newChild;
   }
 }
 
