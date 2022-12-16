@@ -332,6 +332,11 @@ class Reactable<T> extends Stream<T> {
     if (!_initialized || _dirty) {
       _currentReactable = this;
       _value = _builder();
+
+      if (_value is Stream) {
+        _value = (_value as Stream).asBroadcastStream() as T;
+      }
+
       // Emit value on next cycle to prevent empty listener
       Future.delayed(Duration.zero, () => _streamController.add(_value as T));
       _currentReactable = previousReactable;
@@ -354,7 +359,6 @@ class Reactable<T> extends Stream<T> {
     if (previousReactable != null && !_depended.contains(previousReactable)) {
       _depended.add(previousReactable);
     }
-
     return _value as T;
   }
 
