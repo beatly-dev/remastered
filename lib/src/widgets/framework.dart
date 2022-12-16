@@ -16,7 +16,6 @@ class RemasteredBuildOwner extends BuildOwner {
 
   @override
   void scheduleBuildFor(Element element) {
-    print('scheduleBuildFor: ${element.widget.runtimeType}');
     super.scheduleBuildFor(element);
     if (element is _RemasteredElementBase) {
       _dirtyElements.add(element);
@@ -26,13 +25,11 @@ class RemasteredBuildOwner extends BuildOwner {
   @override
   void finalizeTree() {
     super.finalizeTree();
-    print('Unmount all inactive elements');
     _inactiveElements._unmountAll();
   }
 
   @override
   void buildScope(Element context, [VoidCallback? callback]) {
-    print('clear dirty element');
     super.buildScope(context, callback);
     _dirtyElements.clear();
   }
@@ -180,7 +177,7 @@ class RemasteredState extends State<RemasteredWidget> {
   void dispose() {
     for (final element in _disposables) {
       element._onDispose?.call();
-      element.value.dispose();
+      element.value._onCleanup();
     }
     _disposables.clear();
 
@@ -289,10 +286,6 @@ class RemasteredState extends State<RemasteredWidget> {
   }
 }
 
-// Easily separate controller
-
-typedef RV<T> = Reactable<T>;
-
 class OnDispose<T> {
   OnDispose(this.value, {void Function()? onDispose}) : _onDispose = onDispose;
 
@@ -301,20 +294,12 @@ class OnDispose<T> {
   final void Function()? _onDispose;
 }
 
-class Reactable<T> extends Stream<T> {
-  Reactable(
-    this._builder, {
-    void Function(T)? onFirstBuild,
-    void Function(T)? onDispose,
-  })  : _onDispose = onDispose,
-        _onFirstBuild = onFirstBuild;
+typedef RV<T> = ReactableValue<T>;
 
-  final T Function() _builder;
-  final void Function(T firstValue)? _onFirstBuild;
-  final void Function(T lastValue)? _onDispose;
-  final _streamController = StreamController<T>.broadcast();
+abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
+  Reactable(this._builder);
 
-  Stream<T> get _stream => _streamController.stream;
+  final WrappedType Function() _builder;
 
   bool _initialized = false;
   bool _dirty = false;
@@ -325,29 +310,14 @@ class Reactable<T> extends Stream<T> {
 
   static Reactable? _currentReactable;
 
-  T? _value;
+  WrappedType? _value;
 
-  T get value {
+  WrappedType get value {
     final previousReactable = _currentReactable;
-    if (!_initialized || _dirty) {
-      _currentReactable = this;
-      _value = _builder();
-
-      if (_value is Stream) {
-        _value = (_value as Stream).asBroadcastStream() as T;
-      }
-
-      // Emit value on next cycle to prevent empty listener
-      Future.delayed(Duration.zero, () => _streamController.add(_value as T));
-      _currentReactable = previousReactable;
-
-      _dirty = false;
-    }
-
-    if (!_initialized) {
-      _onFirstBuild?.call(_value as T);
-      _initialized = true;
-    }
+    _currentReactable = this;
+    _rebuildIfDirty();
+    _currentReactable = previousReactable;
+    _checkInitialized();
 
     final currentContext = RemasteredState._currentContext;
 
@@ -359,8 +329,28 @@ class Reactable<T> extends Stream<T> {
     if (previousReactable != null && !_depended.contains(previousReactable)) {
       _depended.add(previousReactable);
     }
-    return _value as T;
+
+    return _value as WrappedType;
   }
+
+  void _rebuildIfDirty() {
+    if (!_initialized || _dirty) {
+      final rebuilt = _builder();
+      _value = _onRebuildValue(rebuilt);
+      _dirty = false;
+    }
+  }
+
+  void _checkInitialized() {
+    if (!_initialized) {
+      _onInit();
+      _initialized = true;
+    }
+  }
+
+  void _onInit();
+
+  WrappedType _onRebuildValue(WrappedType newValue);
 
   void _markChildrenNeedRebuild() {
     if (_dirty) return;
@@ -370,27 +360,74 @@ class Reactable<T> extends Stream<T> {
     }
   }
 
-  set value(T newValue) {
+  set value(WrappedType newValue) {
     _value = newValue;
-    _streamController.add(newValue);
     for (final element in _elements) {
       element.markNeedsBuild();
     }
     _markChildrenNeedRebuild();
+    _onSetValue(newValue);
   }
+
+  void _onSetValue(WrappedType newValue);
 
   void _dispose() {
     if (_elements.isEmpty) {
       _depended.clear();
-      _streamController.close();
-      _onDispose?.call(value);
+      _onCleanup();
       _value = null;
       _initialized = false;
     }
   }
 
+  void _onCleanup();
+
   @override
   String toString() => value.toString();
+}
+
+class ReactableValue<T> extends Reactable<T, T> {
+  ReactableValue(
+    T Function() _builder, {
+    this.onFirstBuild,
+    this.onDispose,
+  }) : super(
+          _builder,
+        );
+
+  final void Function(T firstValue)? onFirstBuild;
+  final void Function(T lastValue)? onDispose;
+
+  final _streamController = StreamController<T>.broadcast();
+
+  Stream<T> get _stream => _streamController.stream;
+
+  @override
+  void _onInit() {
+    onFirstBuild?.call(_value as T);
+  }
+
+  @override
+  T _onRebuildValue(T newValue) {
+    // Emit value on next cycle to prevent empty listener
+    Future.delayed(Duration.zero, () async {
+      _streamController.add(
+        newValue,
+      );
+    });
+    return newValue;
+  }
+
+  @override
+  void _onSetValue(T newValue) {
+    _streamController.add(newValue);
+  }
+
+  @override
+  void _onCleanup() {
+    onDispose?.call(_value as T);
+    _streamController.close();
+  }
 
   @override
   StreamSubscription<T> listen(
@@ -399,10 +436,6 @@ class Reactable<T> extends Stream<T> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    assert(
-      _value is! Stream,
-      'You should use [.value] field to listen to stream on stream reactable',
-    );
     return _stream.listen(
       onData,
       onError: onError,
@@ -412,40 +445,200 @@ class Reactable<T> extends Stream<T> {
   }
 }
 
-Reactable<T> reactable<T>(
-  T Function() builder, {
-  void Function(T lastValue)? onDispose,
-  void Function(T firstValue)? onFirstBuild,
-}) {
-  if (RemasteredState._currentContext != null) {
-    return _localReactable(
-      builder,
-      onDispose: onDispose,
-      onFirstBuild: onFirstBuild,
+class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
+  ReactableFuture(
+    F Function() _builder, {
+    this.onFirstBuild,
+    this.onDispose,
+  }) : super(
+          _builder,
+        );
+
+  final void Function(T)? onFirstBuild;
+  final void Function(T)? onDispose;
+
+  final _streamController = StreamController<T>.broadcast();
+  Stream<T> get _stream => _streamController.stream;
+
+  T? _lastValue;
+
+  @override
+  F _onRebuildValue(F newValue) {
+    newValue.then((event) {
+      _lastValue = event;
+      _streamController.add(event);
+    });
+    return newValue;
+  }
+
+  @override
+  void _onInit() {
+    _value!.then((value) => onFirstBuild?.call(value));
+  }
+
+  @override
+  void _onSetValue(F newValue) {
+    newValue.then((event) {
+      _streamController.add(event);
+      _lastValue = event;
+    });
+  }
+
+  @override
+  void _onCleanup() {
+    if (_lastValue != null) {
+      onDispose?.call(_lastValue as T);
+    }
+  }
+
+  @override
+  StreamSubscription<T> listen(
+    void Function(T event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    return _stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
     );
   }
-  return Reactable(
-    builder,
-    onDispose: onDispose,
-    onFirstBuild: onFirstBuild,
-  );
 }
 
-Reactable<T> _localReactable<T>(
-  T Function() builder, {
+class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
+  ReactableStream(
+    S Function() _builder, {
+    this.onFirstBuild,
+    this.onDispose,
+  }) : super(
+          _builder,
+        );
+
+  final void Function(T)? onFirstBuild;
+  final void Function(T)? onDispose;
+
+  T? _lastValue;
+  S? _stream;
+
+  @override
+  S _onRebuildValue(S newValue) {
+    _stream = (newValue.asBroadcastStream() as S);
+    _stream!.listen((event) {
+      _lastValue = event;
+    });
+    return _stream as S;
+  }
+
+  @override
+  void _onInit() {
+    _stream!.first.then((value) => onFirstBuild?.call(value));
+  }
+
+  @override
+  void _onSetValue(S newValue) {
+    _stream = (newValue.asBroadcastStream() as S);
+    _stream!.listen((event) {
+      _lastValue = event;
+    });
+    _value = _stream as S;
+  }
+
+  @override
+  void _onCleanup() {
+    if (_lastValue != null) {
+      onDispose?.call(_lastValue as T);
+    }
+  }
+
+  @override
+  StreamSubscription<T> listen(
+    void Function(T event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    return value.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+}
+
+ReactableValue<T> reactable<T>(
+  T Function() valueBuilder, {
   void Function(T lastValue)? onDispose,
   void Function(T firstValue)? onFirstBuild,
 }) {
-  if (RemasteredState._currentIsFirstBuild) {
-    final reactable = Reactable(
-      builder,
+  reactableBuilder() {
+    return ReactableValue<T>(
+      valueBuilder,
       onDispose: onDispose,
       onFirstBuild: onFirstBuild,
     );
+  }
+
+  if (RemasteredState._currentContext != null) {
+    return _localReactableValue(reactableBuilder) as ReactableValue<T>;
+  }
+  final reactable = reactableBuilder();
+  return reactable;
+}
+
+ReactableFuture<T, Future<T>> reactableFuture<T>(
+  Future<T> Function() valueBuilder, {
+  void Function(T lastValue)? onDispose,
+  void Function(T firstValue)? onFirstBuild,
+}) {
+  reactableBuilder() {
+    return ReactableFuture<T, Future<T>>(
+      valueBuilder,
+      onDispose: onDispose,
+      onFirstBuild: onFirstBuild,
+    );
+  }
+
+  if (RemasteredState._currentContext != null) {
+    return _localReactableValue(reactableBuilder)
+        as ReactableFuture<T, Future<T>>;
+  }
+  final reactable = reactableBuilder();
+  return reactable;
+}
+
+ReactableStream<T, Stream<T>> reactableStream<T>(
+  Stream<T> Function() valueBuilder, {
+  void Function(T lastValue)? onDispose,
+  void Function(T firstValue)? onFirstBuild,
+}) {
+  reactableBuilder() {
+    return ReactableStream<T, Stream<T>>(
+      valueBuilder,
+      onDispose: onDispose,
+      onFirstBuild: onFirstBuild,
+    );
+  }
+
+  if (RemasteredState._currentContext != null) {
+    return _localReactableValue(reactableBuilder)
+        as ReactableStream<T, Stream<T>>;
+  }
+  final reactable = reactableBuilder();
+  return reactable;
+}
+
+Reactable _localReactableValue(
+  Reactable Function() builder,
+) {
+  if (RemasteredState._currentIsFirstBuild) {
+    final reactable = builder();
     RemasteredState._currentLocalReactables.add(reactable);
   }
-  return RemasteredState._currentLocalReactables[
-      RemasteredState._currentLocalReactableIndex++] as Reactable<T>;
+  return RemasteredState
+      ._currentLocalReactables[RemasteredState._currentLocalReactableIndex++];
 }
 
 T disposable<T>(
@@ -461,7 +654,7 @@ T disposable<T>(
   }
   final initialValue = builder();
   try {
-    (initialValue as dynamic).dispose;
+    (initialValue as dynamic)._onCleanup;
   } catch (e) {
     throw Exception(
       'The value passed to disposable must have a dispose method',

@@ -92,7 +92,7 @@ class DebouncedCounter extends RemasteredWidget {
 
   @override
   Stream<Widget> emit(BuildContext context) async* {
-    await for (final count in debounced.value) {
+    await for (final count in debounced) {
       yield Text('Debounced $count');
     }
   }
@@ -108,10 +108,7 @@ class AsyncCounter extends RemasteredWidget {
 
   @override
   Stream<Widget> emit(BuildContext context) async* {
-    final countStream = counter.debounceTime(
-      const Duration(seconds: 3),
-    );
-    await for (final count in countStream) {
+    await for (final count in rebounced) {
       yield Text('Async $count');
     }
   }
@@ -122,9 +119,18 @@ class AsyncCounter extends RemasteredWidget {
   }
 }
 
-final debounced = reactable(
+final debounced = reactableStream(
   () => counter.debounceTime(const Duration(seconds: 1)),
 );
+final rebounced = reactableStream(() => debounced.map((value) {
+      return value * 3;
+    }));
+final pureStream = reactable(() async* {
+  for (int i = 0; i < 1000; ++i) {
+    await Future.delayed(const Duration(seconds: 1));
+    yield i;
+  }
+});
 
 final pureFuture = reactable(() async {
   final count = counter.value;
