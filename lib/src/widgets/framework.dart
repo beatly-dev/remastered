@@ -166,7 +166,7 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   bool _initialized = false;
   bool _dirty = false;
-  bool _scoped = false;
+  bool scoped = false;
 
   final _elements = HashSet<Element>();
 
@@ -177,17 +177,27 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
   WrappedType? _value;
 
   Reactable<InnerType, WrappedType> of(BuildContext context) {
-    return RemasteredProvider.of(context)?.find(this)
-            as Reactable<InnerType, WrappedType>? ??
-        this;
+    if (context is! RemasteredElement) {
+      throw Exception(
+        '[Reactable.of()] can only be called from a [RemasteredWidget] and [RemasteredConsumer]',
+      );
+    }
+
+    final scoped = RemasteredProvider.of(context)?.find(this)
+        as Reactable<InnerType, WrappedType>?;
+
+    if (scoped == null) {
+      return this;
+    }
+
+    return scoped;
   }
 
   WrappedType get value {
-    if (!_scoped) {
+    if (!scoped) {
       final scopedReactable = RemasteredContainer.directContainer?.find(this);
 
       if (scopedReactable != null) {
-        scopedReactable._scoped = true;
         return scopedReactable.value;
       }
     }
@@ -480,7 +490,6 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    print('Listen stream rx');
     return value.listen(
       onData,
       onError: onError,
