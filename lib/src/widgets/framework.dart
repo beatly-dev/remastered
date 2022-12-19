@@ -71,7 +71,7 @@ class RemasteredState extends State<RemasteredWidget> {
   static var _currentIsFirstBuild = true;
   static BuildContext? _currentContext;
 
-  final _reactables = <Reactable>[];
+  final _globalReactables = <Reactable>[];
   final _localReactables = <Reactable>[];
   final _disposables = <OnDispose>[];
   final _cancelables = <OnDispose>[];
@@ -92,11 +92,11 @@ class RemasteredState extends State<RemasteredWidget> {
     }
     _cancelables.clear();
 
-    for (final element in _reactables) {
+    for (final element in _globalReactables) {
       element._elements.remove(context as Element);
       element._dispose();
     }
-    _reactables.clear();
+    _globalReactables.clear();
 
     for (final element in _localReactables) {
       element._elements.remove(context as Element);
@@ -163,7 +163,7 @@ class RemasteredState extends State<RemasteredWidget> {
     final previousIsFirstBuild = _currentIsFirstBuild;
     final previousContext = _currentContext;
 
-    _currentReactables = _reactables;
+    _currentReactables = _globalReactables;
     _currentLocalReactables = _localReactables;
     _currentDisposables = _disposables;
     _currentCancelables = _cancelables;
@@ -473,6 +473,15 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   }
 }
 
+Reactable _createReactable(
+  Reactable Function() builder,
+) {
+  if (RemasteredState._currentContext != null) {
+    return _localReactableValue(builder);
+  }
+  return builder();
+}
+
 ReactableValue<T> reactable<T>(
   T Function() valueBuilder, {
   void Function(T lastValue)? onDispose,
@@ -486,11 +495,7 @@ ReactableValue<T> reactable<T>(
     );
   }
 
-  if (RemasteredState._currentContext != null) {
-    return _localReactableValue(reactableBuilder) as ReactableValue<T>;
-  }
-  final reactable = reactableBuilder();
-  return reactable;
+  return _createReactable(reactableBuilder) as ReactableValue<T>;
 }
 
 ReactableFuture<T, Future<T>> reactableFuture<T>(
@@ -506,12 +511,7 @@ ReactableFuture<T, Future<T>> reactableFuture<T>(
     );
   }
 
-  if (RemasteredState._currentContext != null) {
-    return _localReactableValue(reactableBuilder)
-        as ReactableFuture<T, Future<T>>;
-  }
-  final reactable = reactableBuilder();
-  return reactable;
+  return _createReactable(reactableBuilder) as ReactableFuture<T, Future<T>>;
 }
 
 ReactableStream<T, Stream<T>> reactableStream<T>(
@@ -527,18 +527,15 @@ ReactableStream<T, Stream<T>> reactableStream<T>(
     );
   }
 
-  if (RemasteredState._currentContext != null) {
-    return _localReactableValue(reactableBuilder)
-        as ReactableStream<T, Stream<T>>;
-  }
-  final reactable = reactableBuilder();
-  return reactable;
+  return _createReactable(reactableBuilder) as ReactableStream<T, Stream<T>>;
 }
 
 Reactable _localReactableValue(
   Reactable Function() builder,
 ) {
-  if (RemasteredState._currentIsFirstBuild) {
+  if (RemasteredState._currentIsFirstBuild ||
+      RemasteredState._currentLocalReactables.length <
+          RemasteredState._currentLocalReactableIndex) {
     final reactable = builder();
     RemasteredState._currentLocalReactables.add(reactable);
   }
