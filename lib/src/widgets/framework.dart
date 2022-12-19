@@ -556,7 +556,7 @@ T disposable<T>(
   }
   final initialValue = builder();
   try {
-    (initialValue as dynamic)._onCleanup;
+    (initialValue as dynamic).dispose;
   } catch (e) {
     throw Exception(
       'The value passed to disposable must have a dispose method',
