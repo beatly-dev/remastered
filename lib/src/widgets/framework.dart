@@ -237,21 +237,22 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   WrappedType _onRebuildValue(WrappedType newValue);
 
-  void _markChildrenNeedRebuild() {
-    if (_dirty) return;
-    for (final child in _depended) {
-      child._dirty = true;
-      child._markChildrenNeedRebuild();
-    }
-  }
-
   set value(WrappedType newValue) {
+    if (_value == newValue) return;
     _value = newValue;
     for (final element in _elements) {
       element.markNeedsBuild();
     }
     _markChildrenNeedRebuild();
     _onSetValue(newValue);
+  }
+
+  void _markChildrenNeedRebuild() {
+    if (_dirty) return;
+    for (final child in _depended) {
+      child._dirty = true;
+      child._markChildrenNeedRebuild();
+    }
   }
 
   void _onSetValue(WrappedType newValue);
@@ -410,7 +411,7 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   @override
   S _onRebuildValue(S newValue) {
     _stream = (newValue.asBroadcastStream() as S);
-    _stream!.listen((event) {
+    _stream?.listen((event) {
       _lastValue = event;
     });
     return _stream as S;
@@ -418,16 +419,16 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
 
   @override
   void _onInit() {
-    _stream!.first.then((value) => onFirstBuild?.call(value));
+    _stream?.first.then((value) => onFirstBuild?.call(value));
   }
 
   @override
   void _onSetValue(S newValue) {
     _stream = (newValue.asBroadcastStream() as S);
-    _stream!.listen((event) {
+    _stream?.listen((event) {
       _lastValue = event;
     });
-    _value = _stream as S;
+    _value = _stream;
   }
 
   @override
