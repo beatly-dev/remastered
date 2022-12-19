@@ -5,66 +5,19 @@ library remastered_foundation;
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:async/async.dart';
 import 'package:flutter/widgets.dart';
 
-mixin _RemasteredElementBase on Element {
-  bool activated = false;
+import '../../remastered.dart';
+import 'container.dart';
 
-  @override
-  void mount(Element? parent, Object? newSlot) {
-    super.mount(parent, newSlot);
-    activated = true;
-  }
-
-  @override
-  void activate() {
-    super.activate();
-    activated = true;
-  }
-
-  @override
-  void deactivate() {
-    activated = false;
-    super.deactivate();
-  }
-
-  @override
-  void unmount() {
-    activated = false;
-    super.unmount();
-  }
-
-  @override
-  void deactivateChild(Element child) {
-    super.deactivateChild(child);
-  }
-}
-
-class RemasteredElement extends StatefulElement with _RemasteredElementBase {
+class RemasteredElement extends StatelessElement {
   RemasteredElement(super.widget);
-}
 
-abstract class RemasteredWidget extends StatefulWidget {
-  const RemasteredWidget({super.key});
-
-  @override
-  StatefulElement createElement() => RemasteredElement(this);
-
-  @override
-  RemasteredState createState() => RemasteredState();
-
-  FutureOr<Widget>? build(BuildContext context) => null;
-  Stream<Widget>? emit(BuildContext context) => null;
-  Widget onLoading(BuildContext context) => const SizedBox.shrink();
-  Widget onError(BuildContext context, dynamic error) =>
-      const SizedBox.shrink();
-}
-
-class RemasteredState extends State<RemasteredWidget> {
   static var _currentLocalReactableIndex = 0;
   static var _currentDisposableIndex = 0;
   static var _currentCancelableIndex = 0;
-  static RemasteredState? _currentState;
+  static RemasteredElement? _currentElement;
 
   final _globalReactables = <Reactable>[];
   final _localReactables = <Reactable>[];
@@ -72,9 +25,8 @@ class RemasteredState extends State<RemasteredWidget> {
   final _cancelables = <OnDispose>[];
   var _isFirstBuild = true;
 
-  @mustCallSuper
   @override
-  void dispose() {
+  void unmount() {
     for (final element in _disposables) {
       element._onDispose?.call();
       element.value._onCleanup();
@@ -88,61 +40,62 @@ class RemasteredState extends State<RemasteredWidget> {
     _cancelables.clear();
 
     for (final element in _globalReactables) {
-      element._elements.remove(context as Element);
+      element._elements.remove(this);
       element._dispose();
     }
     _globalReactables.clear();
 
     for (final element in _localReactables) {
-      element._elements.remove(context as Element);
+      element._elements.remove(this);
       element._dispose();
     }
     _localReactables.clear();
 
-    super.dispose();
+    super.unmount();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build() {
     return _lockState(() {
-      final newWidgetFuture = widget.build(context);
-      final newWidgetStream = widget.emit(context);
+      final remasteredWidget = widget as RemasteredWidget;
+      final newWidget = (remasteredWidget).emit(this);
 
-      assert(
-        // ignore: unrelated_type_equality_checks
-        newWidgetStream != newWidgetFuture,
-        'You should override build or emit method',
-      );
-
-      if (newWidgetFuture is Widget) {
-        return newWidgetFuture;
+      if (newWidget is Widget) {
+        return newWidget;
       }
 
-      if (newWidgetFuture is Future) {
+      if (newWidget is Future<Widget>) {
         return FutureBuilder(
           builder: (context, future) {
             if (future.hasData) {
               return future.data as Widget;
             }
             if (future.hasError) {
-              return widget.onError(context, future.error);
+              return remasteredWidget.onError(context, future.error);
             }
-            return widget.onLoading(context);
+            return remasteredWidget.onLoading(context);
           },
-          future: newWidgetFuture,
+          future: newWidget,
         );
       }
-      return StreamBuilder(
-        builder: (context, snapshot) {
-          if (snapshot.hasData) {
-            return snapshot.data as Widget;
-          }
-          if (snapshot.hasError) {
-            return widget.onError(context, snapshot.error);
-          }
-          return widget.onLoading(context);
-        },
-        stream: newWidgetStream as Stream<Widget>,
+
+      if (newWidget is Stream<Widget>) {
+        return StreamBuilder(
+          builder: (context, snapshot) {
+            if (snapshot.hasData) {
+              return snapshot.data as Widget;
+            }
+            if (snapshot.hasError) {
+              return remasteredWidget.onError(context, snapshot.error);
+            }
+            return remasteredWidget.onLoading(context);
+          },
+          stream: newWidget,
+        );
+      }
+
+      throw Exception(
+        'Invalid widget type. Must be either Widget, Future<Widget> or Stream<Widget>',
       );
     });
   }
@@ -151,24 +104,49 @@ class RemasteredState extends State<RemasteredWidget> {
     final previousReactableIndex = _currentLocalReactableIndex;
     final previousDisposableIndex = _currentDisposableIndex;
     final previousCancelableIndex = _currentCancelableIndex;
-    final previousState = _currentState;
+    final previousElement = _currentElement;
+    final previousContainer = RemasteredContainer.directContainer;
 
     _currentLocalReactableIndex = 0;
     _currentDisposableIndex = 0;
     _currentCancelableIndex = 0;
-    _currentState = this;
+    _currentElement = this;
+
+    final nearestContainer = RemasteredProvider.of(this);
+    if (previousContainer != nearestContainer) {
+      RemasteredContainer.directContainer = nearestContainer;
+      RemasteredContainer.directContainer?.parent = previousContainer;
+    }
 
     final result = callback();
 
     _currentLocalReactableIndex = previousReactableIndex;
     _currentDisposableIndex = previousDisposableIndex;
     _currentCancelableIndex = previousCancelableIndex;
-    _currentState = previousState;
+    _currentElement = previousElement;
+    RemasteredContainer.directContainer = previousContainer;
 
     _isFirstBuild = false;
 
     return result;
   }
+}
+
+abstract class RemasteredWidget extends StatelessWidget {
+  const RemasteredWidget({super.key});
+
+  @override
+  RemasteredElement createElement() => RemasteredElement(this);
+
+  @override
+  Widget build(BuildContext context) {
+    throw UnsupportedError('Should not call [RemasteredWidget.build]');
+  }
+
+  dynamic emit(BuildContext context);
+  Widget onLoading(BuildContext context) => const SizedBox.shrink();
+  Widget onError(BuildContext context, dynamic error) =>
+      const SizedBox.shrink();
 }
 
 class OnDispose<T> {
@@ -188,6 +166,7 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   bool _initialized = false;
   bool _dirty = false;
+  bool _scoped = false;
 
   final _elements = HashSet<Element>();
 
@@ -197,18 +176,33 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   WrappedType? _value;
 
+  Reactable<InnerType, WrappedType> of(BuildContext context) {
+    return RemasteredProvider.of(context)?.find(this)
+            as Reactable<InnerType, WrappedType>? ??
+        this;
+  }
+
   WrappedType get value {
+    if (!_scoped) {
+      final scopedReactable = RemasteredContainer.directContainer?.find(this);
+
+      if (scopedReactable != null) {
+        scopedReactable._scoped = true;
+        return scopedReactable.value;
+      }
+    }
+
     final previousReactable = _currentReactable;
     _currentReactable = this;
     _rebuildIfDirty();
     _currentReactable = previousReactable;
     _checkInitialized();
 
-    final currentContext = RemasteredState._currentState?.context;
+    final currentContext = RemasteredElement._currentElement;
 
     if (currentContext != null && !_elements.contains(currentContext)) {
-      RemasteredState._currentState!._globalReactables.add(this);
-      _elements.add(currentContext as Element);
+      RemasteredElement._currentElement!._globalReactables.add(this);
+      _elements.add(currentContext);
     }
 
     if (previousReactable != null && !_depended.contains(previousReactable)) {
@@ -238,6 +232,13 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
   WrappedType _onRebuildValue(WrappedType newValue);
 
   set value(WrappedType newValue) {
+    final scopedReactable = RemasteredContainer.directContainer?.find(this);
+
+    if (scopedReactable != null) {
+      scopedReactable.value = newValue;
+      return;
+    }
+
     if (_value == newValue) return;
     _value = newValue;
     for (final element in _elements) {
@@ -268,8 +269,21 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   void _onCleanup();
 
+  Reactable clone();
+
+  ScopedReactable overrideWith({
+    Reactable? scoped,
+  }) {
+    return ScopedReactable(
+      this,
+      scoped ?? clone(),
+    );
+  }
+
   @override
   String toString() => value.toString();
+
+  String get key => 'Rx$hashCode${_builder.hashCode}';
 }
 
 class ReactableValue<T> extends Reactable<T, T> {
@@ -322,11 +336,23 @@ class ReactableValue<T> extends Reactable<T, T> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    return _stream.listen(
+    final newGroup = StreamGroup<T>();
+    newGroup.add(Stream.value(_value as T));
+    newGroup.add(_stream);
+    return newGroup.stream.listen(
       onData,
       onError: onError,
       onDone: onDone,
       cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  Reactable clone() {
+    return ReactableValue<T>(
+      () => _builder(),
+      onFirstBuild: onFirstBuild,
+      onDispose: onDispose,
     );
   }
 }
@@ -391,6 +417,15 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
       cancelOnError: cancelOnError,
     );
   }
+
+  @override
+  Reactable clone() {
+    return ReactableFuture<T, F>(
+      () => _builder(),
+      onFirstBuild: onFirstBuild,
+      onDispose: onDispose,
+    );
+  }
 }
 
 class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
@@ -445,11 +480,21 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
+    print('Listen stream rx');
     return value.listen(
       onData,
       onError: onError,
       onDone: onDone,
       cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  Reactable clone() {
+    return ReactableStream<T, S>(
+      () => _builder(),
+      onFirstBuild: onFirstBuild,
+      onDispose: onDispose,
     );
   }
 }
@@ -505,7 +550,7 @@ ReactableStream<T, Stream<T>> reactableStream<T>(
 Reactable _createReactable(
   Reactable Function() builder,
 ) {
-  if (RemasteredState._currentState != null) {
+  if (RemasteredElement._currentElement != null) {
     return _localReactableValue(builder);
   }
   return builder();
@@ -514,14 +559,15 @@ Reactable _createReactable(
 Reactable _localReactableValue(
   Reactable Function() builder,
 ) {
-  final currentReactables = RemasteredState._currentState!._localReactables;
-  if (RemasteredState._currentState!._isFirstBuild ||
-      RemasteredState._currentState!._localReactables.length <=
-          RemasteredState._currentLocalReactableIndex) {
+  final currentElement = RemasteredElement._currentElement;
+  final currentReactables = currentElement!._localReactables;
+  if (currentElement._isFirstBuild ||
+      currentReactables.length <=
+          RemasteredElement._currentLocalReactableIndex) {
     final reactable = builder();
     currentReactables.add(reactable);
   }
-  return currentReactables[RemasteredState._currentLocalReactableIndex++];
+  return currentReactables[RemasteredElement._currentLocalReactableIndex++];
 }
 
 T disposable<T>(
@@ -529,10 +575,12 @@ T disposable<T>(
   void Function(T firstValue)? onFirstBuild,
   void Function(T lastValue)? onDispose,
 }) {
-  final currentDisposables = RemasteredState._currentState!._disposables;
-  if (!RemasteredState._currentState!._isFirstBuild &&
-      RemasteredState._currentDisposableIndex < currentDisposables.length) {
-    return currentDisposables[RemasteredState._currentDisposableIndex++].value;
+  final currentElement = RemasteredElement._currentElement;
+  final currentDisposables = currentElement!._disposables;
+  if (!currentElement._isFirstBuild &&
+      RemasteredElement._currentDisposableIndex < currentDisposables.length) {
+    return currentDisposables[RemasteredElement._currentDisposableIndex++]
+        .value;
   }
   final initialValue = builder();
   try {
@@ -548,6 +596,7 @@ T disposable<T>(
   );
   currentDisposables.add(value);
   onFirstBuild?.call(initialValue);
+  RemasteredElement._currentDisposableIndex++;
   return initialValue;
 }
 
@@ -556,10 +605,12 @@ T cancelable<T>(
   void Function(T firstValue)? onFirstBuild,
   void Function(T lastValue)? onDispose,
 }) {
-  final currentCancelables = RemasteredState._currentState!._cancelables;
-  if (!RemasteredState._currentState!._isFirstBuild &&
-      RemasteredState._currentCancelableIndex < currentCancelables.length) {
-    return currentCancelables[RemasteredState._currentCancelableIndex++].value;
+  final currentElement = RemasteredElement._currentElement;
+  final currentCancelables = currentElement!._cancelables;
+  if (!currentElement._isFirstBuild &&
+      RemasteredElement._currentCancelableIndex < currentCancelables.length) {
+    return currentCancelables[RemasteredElement._currentCancelableIndex++]
+        .value;
   }
   final initialValue = builder();
   try {
@@ -575,5 +626,6 @@ T cancelable<T>(
   );
   currentCancelables.add(value);
   onFirstBuild?.call(initialValue);
+  RemasteredElement._currentCancelableIndex++;
   return initialValue;
 }
