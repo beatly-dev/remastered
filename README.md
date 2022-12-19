@@ -2,10 +2,10 @@
 
 - [x]: Reactive state management
 - [x]: Reactive widget
+- [x]: Scoped reactables
 
 ## TODO
 
-- [ ]: Scoped reactables
 - [ ]: Reactable family
 - [ ]: Cacheable data
 - [ ]: Cached widget
