@@ -10,7 +10,7 @@ class MyApp extends RemasteredWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget emit(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
@@ -24,14 +24,19 @@ class MyApp extends RemasteredWidget {
   }
 }
 
+final counter = reactable(() => 0);
+
+final delayedCounter = reactableStream(() {
+  return counter.debounceTime(const Duration(seconds: 1));
+});
+
 class MyHomePage extends RemasteredWidget {
   const MyHomePage({super.key, required this.title});
 
   final String title;
 
   @override
-  Widget build(BuildContext context) {
-    final localCounter = reactable(() => 0);
+  Widget emit(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -44,15 +49,7 @@ class MyHomePage extends RemasteredWidget {
               'You have pushed the button this many times:',
             ),
             Text(
-              'local $localCounter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
-            Text(
               'simple $counter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
-            Text(
-              'doubled $doubled',
               style: Theme.of(context).textTheme.headline4,
             ),
             Text(
@@ -61,14 +58,32 @@ class MyHomePage extends RemasteredWidget {
             ),
             const DebouncedCounter(),
             const AsyncCounter(),
-            const FutureCounter(),
+            Expanded(
+              child: RemasteredProvider(
+                resetAll: true,
+                child: RemasteredConsumer(
+                  builder: (context) {
+                    final scoped = counter.of(context);
+                    return Column(
+                      children: [
+                        Text('overriden $scoped'),
+                        TextButton(
+                            onPressed: () {
+                              scoped.value++;
+                            },
+                            child: const Text("Add one")),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           counter.value++;
-          localCounter.value += 8;
         },
         tooltip: 'Increment',
         child: const Icon(Icons.add),
@@ -77,9 +92,24 @@ class MyHomePage extends RemasteredWidget {
   }
 }
 
-final counter = reactable(
-  () => 0,
-);
+class ScopedCounter extends RemasteredWidget {
+  const ScopedCounter({super.key});
+
+  @override
+  Widget emit(BuildContext context) {
+    return Column(
+      children: [
+        Text('overriden $counter'),
+        TextButton(
+            onPressed: () {
+              final cc = counter.of(context);
+              cc.value++;
+            },
+            child: const Text("Add one")),
+      ],
+    );
+  }
+}
 
 final doubled = reactable(
   () => counter.value * 2,
@@ -119,30 +149,21 @@ class AsyncCounter extends RemasteredWidget {
   }
 }
 
+Future<int> asdf() async {
+  return 0;
+}
+
 final debounced = reactableStream(
   () => counter.debounceTime(const Duration(seconds: 1)),
 );
+
 final rebounced = reactableStream(() => debounced.map((value) {
       return value * 3;
     }));
+
 final pureStream = reactable(() async* {
   for (int i = 0; i < 1000; ++i) {
     await Future.delayed(const Duration(seconds: 1));
     yield i;
   }
 });
-
-final pureFuture = reactable(() async {
-  final count = counter.value;
-  return count * 3;
-});
-
-class FutureCounter extends RemasteredWidget {
-  const FutureCounter({super.key});
-
-  @override
-  Future<Widget> build(BuildContext context) async {
-    final count = await pureFuture.value;
-    return Text('Future $count');
-  }
-}
