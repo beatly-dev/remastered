@@ -420,7 +420,12 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    return _stream.listen(
+    final newGroup = StreamGroup<T>();
+    if (_lastValue is T) {
+      newGroup.add(Stream.value(_lastValue as T));
+    }
+    newGroup.add(_stream);
+    return newGroup.stream.listen(
       onData,
       onError: onError,
       onDone: onDone,
@@ -490,7 +495,12 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
     void Function()? onDone,
     bool? cancelOnError,
   }) {
-    return value.listen(
+    final newGroup = StreamGroup<T>();
+    if (_lastValue is T) {
+      newGroup.add(Stream.value(_lastValue as T));
+    }
+    newGroup.add(value);
+    return newGroup.stream.listen(
       onData,
       onError: onError,
       onDone: onDone,
