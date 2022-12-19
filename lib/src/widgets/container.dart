@@ -5,10 +5,10 @@ class RemasteredContainer {
     List<ScopedReactable> overrides = const [],
     this.resetAll = false,
   }) {
-    this.overrides = Map<String, Reactable>.fromIterable(
-      overrides,
-      key: (rx) => rx.key,
-    );
+    this.overrides = {
+      for (final scoped in overrides)
+        scoped.originKey: scoped.scoped..scoped = true,
+    };
   }
 
   static RemasteredContainer? directContainer;
@@ -20,7 +20,7 @@ class RemasteredContainer {
 
   Reactable? find(Reactable origin) {
     if (resetAll) {
-      return overrides[origin.key] ??= origin.clone();
+      return overrides[origin.key] ??= origin.clone()..scoped = true;
     }
 
     final scoped = overrides[origin.key];
