@@ -61,15 +61,10 @@ abstract class RemasteredWidget extends StatefulWidget {
 }
 
 class RemasteredState extends State<RemasteredWidget> {
-  static var _currentReactables = <Reactable>[];
-  static var _currentLocalReactables = <Reactable>[];
-  static var _currentDisposables = <OnDispose>[];
-  static var _currentCancelables = <OnDispose>[];
   static var _currentLocalReactableIndex = 0;
   static var _currentDisposableIndex = 0;
   static var _currentCancelableIndex = 0;
-  static var _currentIsFirstBuild = true;
-  static BuildContext? _currentContext;
+  static RemasteredState? _currentState;
 
   final _globalReactables = <Reactable>[];
   final _localReactables = <Reactable>[];
@@ -153,37 +148,22 @@ class RemasteredState extends State<RemasteredWidget> {
   }
 
   T _lockState<T>(T Function() callback) {
-    final previousReactables = _currentReactables;
-    final previousLocalReactables = _currentLocalReactables;
-    final previousDisposables = _currentDisposables;
-    final previousCancelables = _currentCancelables;
     final previousReactableIndex = _currentLocalReactableIndex;
     final previousDisposableIndex = _currentDisposableIndex;
     final previousCancelableIndex = _currentCancelableIndex;
-    final previousIsFirstBuild = _currentIsFirstBuild;
-    final previousContext = _currentContext;
+    final previousState = _currentState;
 
-    _currentReactables = _globalReactables;
-    _currentLocalReactables = _localReactables;
-    _currentDisposables = _disposables;
-    _currentCancelables = _cancelables;
     _currentLocalReactableIndex = 0;
     _currentDisposableIndex = 0;
     _currentCancelableIndex = 0;
-    _currentIsFirstBuild = _isFirstBuild;
-    _currentContext = context;
+    _currentState = this;
 
     final result = callback();
 
-    _currentReactables = previousReactables;
-    _currentLocalReactables = previousLocalReactables;
-    _currentDisposables = previousDisposables;
-    _currentCancelables = previousCancelables;
     _currentLocalReactableIndex = previousReactableIndex;
     _currentDisposableIndex = previousDisposableIndex;
     _currentCancelableIndex = previousCancelableIndex;
-    _currentIsFirstBuild = previousIsFirstBuild;
-    _currentContext = previousContext;
+    _currentState = previousState;
 
     _isFirstBuild = false;
 
@@ -224,10 +204,10 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
     _currentReactable = previousReactable;
     _checkInitialized();
 
-    final currentContext = RemasteredState._currentContext;
+    final currentContext = RemasteredState._currentState?.context;
 
     if (currentContext != null && !_elements.contains(currentContext)) {
-      RemasteredState._currentReactables.add(this);
+      RemasteredState._currentState!._globalReactables.add(this);
       _elements.add(currentContext as Element);
     }
 
@@ -473,15 +453,6 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   }
 }
 
-Reactable _createReactable(
-  Reactable Function() builder,
-) {
-  if (RemasteredState._currentContext != null) {
-    return _localReactableValue(builder);
-  }
-  return builder();
-}
-
 ReactableValue<T> reactable<T>(
   T Function() valueBuilder, {
   void Function(T lastValue)? onDispose,
@@ -530,17 +501,26 @@ ReactableStream<T, Stream<T>> reactableStream<T>(
   return _createReactable(reactableBuilder) as ReactableStream<T, Stream<T>>;
 }
 
+Reactable _createReactable(
+  Reactable Function() builder,
+) {
+  if (RemasteredState._currentState != null) {
+    return _localReactableValue(builder);
+  }
+  return builder();
+}
+
 Reactable _localReactableValue(
   Reactable Function() builder,
 ) {
-  if (RemasteredState._currentIsFirstBuild ||
-      RemasteredState._currentLocalReactables.length <
+  final currentReactables = RemasteredState._currentState!._localReactables;
+  if (RemasteredState._currentState!._isFirstBuild ||
+      RemasteredState._currentState!._localReactables.length <=
           RemasteredState._currentLocalReactableIndex) {
     final reactable = builder();
-    RemasteredState._currentLocalReactables.add(reactable);
+    currentReactables.add(reactable);
   }
-  return RemasteredState
-      ._currentLocalReactables[RemasteredState._currentLocalReactableIndex++];
+  return currentReactables[RemasteredState._currentLocalReactableIndex++];
 }
 
 T disposable<T>(
@@ -548,11 +528,10 @@ T disposable<T>(
   void Function(T firstValue)? onFirstBuild,
   void Function(T lastValue)? onDispose,
 }) {
-  if (!RemasteredState._currentIsFirstBuild &&
-      RemasteredState._currentDisposableIndex <
-          RemasteredState._currentDisposables.length) {
-    return RemasteredState
-        ._currentDisposables[RemasteredState._currentDisposableIndex++].value;
+  final currentDisposables = RemasteredState._currentState!._disposables;
+  if (!RemasteredState._currentState!._isFirstBuild &&
+      RemasteredState._currentDisposableIndex < currentDisposables.length) {
+    return currentDisposables[RemasteredState._currentDisposableIndex++].value;
   }
   final initialValue = builder();
   try {
@@ -566,7 +545,7 @@ T disposable<T>(
     initialValue,
     onDispose: () => onDispose?.call(initialValue),
   );
-  RemasteredState._currentDisposables.add(value);
+  currentDisposables.add(value);
   onFirstBuild?.call(initialValue);
   return initialValue;
 }
@@ -576,11 +555,10 @@ T cancelable<T>(
   void Function(T firstValue)? onFirstBuild,
   void Function(T lastValue)? onDispose,
 }) {
-  if (!RemasteredState._currentIsFirstBuild &&
-      RemasteredState._currentCancelableIndex <
-          RemasteredState._currentCancelables.length) {
-    return RemasteredState
-        ._currentCancelables[RemasteredState._currentCancelableIndex++].value;
+  final currentCancelables = RemasteredState._currentState!._cancelables;
+  if (!RemasteredState._currentState!._isFirstBuild &&
+      RemasteredState._currentCancelableIndex < currentCancelables.length) {
+    return currentCancelables[RemasteredState._currentCancelableIndex++].value;
   }
   final initialValue = builder();
   try {
@@ -594,7 +572,7 @@ T cancelable<T>(
     initialValue,
     onDispose: () => onDispose?.call(initialValue),
   );
-  RemasteredState._currentCancelables.add(value);
+  currentCancelables.add(value);
   onFirstBuild?.call(initialValue);
   return initialValue;
 }
