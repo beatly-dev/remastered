@@ -217,11 +217,7 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
     final scoped = RemasteredProvider.of(context)?.find(this)
         as Reactable<InnerType, WrappedType>?;
 
-    if (scoped == null) {
-      return this;
-    }
-
-    return scoped;
+    return scoped ?? this;
   }
 
   WrappedType get value {

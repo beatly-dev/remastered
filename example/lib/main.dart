@@ -100,21 +100,23 @@ class MyHomePage extends RemasteredWidget {
             Expanded(
               child: RemasteredProvider(
                 resetAll: true,
-                child: RemasteredConsumer(
-                  builder: (context) {
-                    final scoped = counter.of(context);
-                    return Column(
-                      children: [
-                        Text('overriden $scoped'),
-                        TextButton(
-                            onPressed: () {
-                              scoped.value++;
-                            },
-                            child: const Text("Add one")),
-                      ],
-                    );
-                  },
-                ),
+                child: RemasteredConsumer(builder: (context) {
+                  final scopedDoubled = reactable(() => counter.value * 2);
+                  return RemasteredConsumer(
+                    builder: (context) {
+                      return Column(
+                        children: [
+                          Text('overriden $scopedDoubled'),
+                          TextButton(
+                              onPressed: () {
+                                counter.of(context).value++;
+                              },
+                              child: const Text("Add one")),
+                        ],
+                      );
+                    },
+                  );
+                }),
               ),
             ),
           ],
@@ -196,9 +198,8 @@ final debounced = reactableStream(
   () => counter.debounceTime(const Duration(seconds: 1)),
 );
 
-final rebounced = reactableStream(() => debounced.map((value) {
-      return value * 3;
-    }));
+final rebounced =
+    reactableStream(() => counter.throttleTime(const Duration(seconds: 1)));
 
 final pureStream = reactable(() async* {
   for (int i = 0; i < 1000; ++i) {
