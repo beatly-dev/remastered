@@ -21,6 +21,22 @@ class RemasteredElement extends StatelessElement {
   final _localCache = <OnDispose>[];
   var _isFirstBuild = true;
 
+  RemasteredWidget get remasteredWidget => widget as RemasteredWidget;
+
+  @override
+  void mount(Element? parent, Object? newSlot) {
+    remasteredWidget.beforeFirstBuild();
+    super.mount(parent, newSlot);
+    _lockState(() => remasteredWidget.afterFirstBuild(this));
+  }
+
+  @override
+  void performRebuild() {
+    _lockState(() => remasteredWidget.beforeRebuild(this));
+    super.performRebuild();
+    _lockState(() => remasteredWidget.afterRebuild(this));
+  }
+
   @override
   void reassemble() {
     _clearLocalCache();
@@ -42,6 +58,7 @@ class RemasteredElement extends StatelessElement {
 
   @override
   void unmount() {
+    _lockState(() => remasteredWidget.beforeDispose(this));
     _clearLocalCache();
 
     for (final element in _globalReactables) {
@@ -57,7 +74,6 @@ class RemasteredElement extends StatelessElement {
   @override
   Widget build() {
     return _lockState(() {
-      final remasteredWidget = widget as RemasteredWidget;
       final newWidget = (remasteredWidget).emit(this);
 
       if (newWidget is Widget) {
@@ -98,6 +114,12 @@ class RemasteredElement extends StatelessElement {
         'Invalid widget type. Must be either Widget, Future<Widget> or Stream<Widget>',
       );
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lockState(() => remasteredWidget.afterChangeDependencies(this));
   }
 
   T _lockState<T>(T Function() callback) {
@@ -141,6 +163,13 @@ abstract class RemasteredWidget extends StatelessWidget {
   Widget onLoading(BuildContext context) => const SizedBox.shrink();
   Widget onError(BuildContext context, dynamic error) =>
       const SizedBox.shrink();
+
+  void beforeFirstBuild() {}
+  void afterFirstBuild(BuildContext context) {}
+  void beforeRebuild(BuildContext context) {}
+  void afterRebuild(BuildContext context) {}
+  void afterChangeDependencies(BuildContext context) {}
+  void beforeDispose(BuildContext context) {}
 }
 
 abstract class OnDispose<T> {

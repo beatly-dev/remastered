@@ -4,12 +4,12 @@
 - [x]: Reactive widget
 - [x]: Scoped reactables
 - [x]: Cacheable data
+  - [ ]: Rebuild on dependency change
+- [x]: Widget lifecycle handler
 
 ## TODO
 
 - [ ]: Reactable family
-- [ ]: Cached widget
-- [ ]: Widget lifecycle handler
 - [ ]: App lifecycle handler
 - [ ]: Write document
 - [ ]: DI Container

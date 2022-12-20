@@ -36,7 +36,36 @@ class MyHomePage extends RemasteredWidget {
   final String title;
 
   @override
+  void beforeFirstBuild() {}
+
+  @override
+  void afterFirstBuild(BuildContext context) {
+    print("after first build $counter");
+  }
+
+  @override
+  void beforeRebuild(BuildContext context) {
+    print("before rebuild $counter");
+  }
+
+  @override
+  void afterRebuild(BuildContext context) {
+    print("after rebuild $counter");
+  }
+
+  @override
+  void afterChangeDependencies(BuildContext context) {
+    print("after  change deps $counter");
+  }
+
+  @override
+  void beforeDispose(BuildContext context) {
+    print("before dispose $counter");
+  }
+
+  @override
   Widget emit(BuildContext context) {
+    final localCounter = cached(() => reactable(() => 0));
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -47,6 +76,16 @@ class MyHomePage extends RemasteredWidget {
           children: <Widget>[
             const Text(
               'You have pushed the button this many times:',
+            ),
+            Text(
+              'local $localCounter',
+              style: Theme.of(context).textTheme.headline4,
+            ),
+            TextButton(
+              onPressed: () {
+                localCounter.value++;
+              },
+              child: const Text("Add local counter one"),
             ),
             Text(
               'simple $counter',
