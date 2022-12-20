@@ -15,28 +15,24 @@ class RemasteredContainer {
   RemasteredContainer? parent;
 
   final bool resetAll;
-  late final Map<String, Reactable> overrides;
+  late final Map<String, RxBase> overrides;
 
-  Reactable? find(Reactable origin) {
+  RxBase? find(RxBase origin) {
     if (resetAll) {
       return overrides[origin.key] ??= origin.clone()..scoped = true;
     }
 
     final scoped = overrides[origin.key];
 
-    if (scoped != null) {
-      return scoped;
-    }
-
-    return parent?.find(origin);
+    return scoped ?? parent?.find(origin);
   }
 }
 
 class ScopedReactable {
   const ScopedReactable(this.origin, this.scoped);
 
-  final Reactable origin;
-  final Reactable scoped;
+  final RxBase origin;
+  final RxBase scoped;
 
   String get originKey => origin.key;
 }

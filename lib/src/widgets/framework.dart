@@ -17,7 +17,7 @@ class RemasteredElement extends StatelessElement {
   static int _currentLocalCacheIndex = 0;
   static RemasteredElement? _currentElement;
 
-  final _globalReactables = <Reactable>[];
+  final _globalReactables = <RxBase>[];
   final _localCache = <OnDispose>[];
   var _isFirstBuild = true;
 
@@ -47,7 +47,7 @@ class RemasteredElement extends StatelessElement {
     for (final elm in _localCache) {
       elm.onDispose();
       final value = elm.value;
-      if (value is Reactable) {
+      if (value is RxBase) {
         value._elements.remove(this);
         value._dispose();
       }
@@ -172,26 +172,8 @@ abstract class RemasteredWidget extends StatelessWidget {
   void beforeDispose(BuildContext context) {}
 }
 
-abstract class OnDispose<T> {
-  T get value;
-
-  void onDispose();
-}
-
-class NonDisposable<T> extends OnDispose<T> {
-  NonDisposable(this.value);
-
-  @override
-  final T value;
-
-  @override
-  void onDispose() {}
-}
-
-typedef RV<T> = ReactableValue<T>;
-
-abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
-  Reactable(this._builder);
+abstract class RxBase<InnerType, WrappedType> extends Stream<InnerType> {
+  RxBase(this._builder);
 
   final WrappedType Function() _builder;
 
@@ -201,13 +183,13 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   final _elements = HashSet<Element>();
 
-  final _depended = HashSet<Reactable>();
+  final _depended = HashSet<RxBase>();
 
-  static Reactable? _currentReactable;
+  static RxBase? _currentReactable;
 
   WrappedType? _value;
 
-  Reactable<InnerType, WrappedType> of(BuildContext context) {
+  RxBase<InnerType, WrappedType> of(BuildContext context) {
     if (context is! RemasteredElement) {
       throw Exception(
         '[Reactable.of()] can only be called from a [RemasteredWidget] and [RemasteredConsumer]',
@@ -215,7 +197,7 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
     }
 
     final scoped = RemasteredProvider.of(context)?.find(this)
-        as Reactable<InnerType, WrappedType>?;
+        as RxBase<InnerType, WrappedType>?;
 
     return scoped ?? this;
   }
@@ -306,10 +288,10 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
 
   void _onCleanup();
 
-  Reactable clone();
+  RxBase clone();
 
   ScopedReactable overrideWith({
-    Reactable? scoped,
+    RxBase? scoped,
   }) {
     return ScopedReactable(
       this,
@@ -323,8 +305,8 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
   String get key => '$runtimeType$hashCode${_builder.hashCode}';
 }
 
-class ReactableValue<T> extends Reactable<T, T> {
-  ReactableValue(
+class ValueRx<T> extends RxBase<T, T> {
+  ValueRx(
     T Function() _builder, {
     this.onFirstBuild,
     this.onDispose,
@@ -384,8 +366,8 @@ class ReactableValue<T> extends Reactable<T, T> {
   }
 
   @override
-  Reactable clone() {
-    return ReactableValue<T>(
+  RxBase clone() {
+    return ValueRx<T>(
       () => _builder(),
       onFirstBuild: onFirstBuild,
       onDispose: onDispose,
@@ -393,9 +375,9 @@ class ReactableValue<T> extends Reactable<T, T> {
   }
 }
 
-class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
-  ReactableFuture(
-    F Function() _builder, {
+class FutureRx<T> extends RxBase<T, Future<T>> {
+  FutureRx(
+    Future<T> Function() _builder, {
     this.onFirstBuild,
     this.onDispose,
   }) : super(
@@ -411,7 +393,7 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
   T? _lastValue;
 
   @override
-  F _onRebuildValue(F newValue) {
+  Future<T> _onRebuildValue(Future<T> newValue) {
     newValue.then((event) {
       _lastValue = event;
       _streamController.add(event);
@@ -425,7 +407,7 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
   }
 
   @override
-  void _onSetValue(F newValue) {
+  void _onSetValue(Future<T> newValue) {
     newValue.then((event) {
       _streamController.add(event);
       _lastValue = event;
@@ -460,8 +442,8 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
   }
 
   @override
-  Reactable clone() {
-    return ReactableFuture<T, F>(
+  RxBase clone() {
+    return FutureRx<T>(
       () => _builder(),
       onFirstBuild: onFirstBuild,
       onDispose: onDispose,
@@ -469,9 +451,9 @@ class ReactableFuture<T, F extends Future<T>> extends Reactable<T, F> {
   }
 }
 
-class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
-  ReactableStream(
-    S Function() _builder, {
+class StreamRx<T> extends RxBase<T, Stream<T>> {
+  StreamRx(
+    Stream<T> Function() _builder, {
     this.onFirstBuild,
     this.onDispose,
   }) : super(
@@ -482,15 +464,15 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   final void Function(T)? onDispose;
 
   T? _lastValue;
-  S? _stream;
+  Stream<T>? _stream;
 
   @override
-  S _onRebuildValue(S newValue) {
-    _stream = (newValue.asBroadcastStream() as S);
+  Stream<T> _onRebuildValue(Stream<T> newValue) {
+    _stream = newValue.asBroadcastStream();
     _stream?.listen((event) {
       _lastValue = event;
     });
-    return _stream as S;
+    return _stream as Stream<T>;
   }
 
   @override
@@ -499,8 +481,8 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   }
 
   @override
-  void _onSetValue(S newValue) {
-    _stream = (newValue.asBroadcastStream() as S);
+  void _onSetValue(Stream<T> newValue) {
+    _stream = newValue.asBroadcastStream();
     _stream?.listen((event) {
       _lastValue = event;
     });
@@ -535,8 +517,8 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   }
 
   @override
-  Reactable clone() {
-    return ReactableStream<T, S>(
+  RxBase clone() {
+    return StreamRx<T>(
       () => _builder(),
       onFirstBuild: onFirstBuild,
       onDispose: onDispose,
@@ -544,56 +526,20 @@ class ReactableStream<T, S extends Stream<T>> extends Reactable<T, S> {
   }
 }
 
-ReactableValue<T> reactable<T>(
-  T Function() valueBuilder, {
-  void Function(T lastValue)? onDispose,
-  void Function(T firstValue)? onFirstBuild,
-}) {
-  return ReactableValue<T>(
-    valueBuilder,
-    onDispose: onDispose,
-    onFirstBuild: onFirstBuild,
-  );
+abstract class OnDispose<T> {
+  T get value;
+
+  void onDispose();
 }
 
-ReactableFuture<T, Future<T>> reactableFuture<T>(
-  Future<T> Function() valueBuilder, {
-  void Function(T lastValue)? onDispose,
-  void Function(T firstValue)? onFirstBuild,
-}) {
-  return ReactableFuture<T, Future<T>>(
-    valueBuilder,
-    onDispose: onDispose,
-    onFirstBuild: onFirstBuild,
-  );
-}
-
-ReactableStream<T, Stream<T>> reactableStream<T>(
-  Stream<T> Function() valueBuilder, {
-  void Function(T lastValue)? onDispose,
-  void Function(T firstValue)? onFirstBuild,
-}) {
-  return ReactableStream<T, Stream<T>>(
-    valueBuilder,
-    onDispose: onDispose,
-    onFirstBuild: onFirstBuild,
-  );
-}
-
-abstract class LazyOnDispose<T> extends OnDispose<T> {
-  LazyOnDispose(
-    this.builder,
-  );
-
-  final T Function() builder;
-
-  T? _value;
+class NonDisposable<T> extends OnDispose<T> {
+  NonDisposable(this.value);
 
   @override
-  T get value {
-    _value ??= builder();
-    return _value as T;
-  }
+  final T value;
+
+  @override
+  void onDispose() {}
 }
 
 class Disposable<T> extends OnDispose<T> {
@@ -609,6 +555,22 @@ class Disposable<T> extends OnDispose<T> {
   @override
   void onDispose() {
     (value as dynamic)?.dispose();
+  }
+}
+
+class Cancelable<T> extends OnDispose<T> {
+  Cancelable(this.value)
+      : assert(
+          (value as dynamic).cancel != null,
+          'The value must have a cancel method to be used as a cancelable',
+        );
+
+  @override
+  final T value;
+
+  @override
+  void onDispose() {
+    (value as dynamic)?.cancel();
   }
 }
 
@@ -654,22 +616,6 @@ T disposable<T>(
     builder,
     create: Disposable.new,
   );
-}
-
-class Cancelable<T> extends OnDispose<T> {
-  Cancelable(this.value)
-      : assert(
-          (value as dynamic).cancel != null,
-          'The value must have a cancel method to be used as a cancelable',
-        );
-
-  @override
-  final T value;
-
-  @override
-  void onDispose() {
-    (value as dynamic)?.cancel();
-  }
 }
 
 T cancelable<T>(

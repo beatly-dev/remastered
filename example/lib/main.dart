@@ -24,9 +24,9 @@ class MyApp extends RemasteredWidget {
   }
 }
 
-final counter = reactable(() => 0);
+final counter = ValueRx(() => 0);
 
-final delayedCounter = reactableStream(() {
+final delayedCounter = StreamRx(() {
   return counter.debounceTime(const Duration(seconds: 1));
 });
 
@@ -65,7 +65,6 @@ class MyHomePage extends RemasteredWidget {
 
   @override
   Widget emit(BuildContext context) {
-    final localCounter = cached(() => reactable(() => 0));
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -76,16 +75,6 @@ class MyHomePage extends RemasteredWidget {
           children: <Widget>[
             const Text(
               'You have pushed the button this many times:',
-            ),
-            Text(
-              'local $localCounter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
-            TextButton(
-              onPressed: () {
-                localCounter.value++;
-              },
-              child: const Text("Add local counter one"),
             ),
             Text(
               'simple $counter',
@@ -101,9 +90,11 @@ class MyHomePage extends RemasteredWidget {
               child: RemasteredProvider(
                 resetAll: true,
                 child: RemasteredConsumer(builder: (context) {
-                  final scopedDoubled = reactable(() => counter.value * 2);
+                  final scopedDoubled =
+                      cached(() => ValueRx(() => counter.value * 2));
                   return RemasteredConsumer(
                     builder: (context) {
+                      scopedDoubled.value;
                       return Column(
                         children: [
                           Text('overriden $scopedDoubled'),
@@ -152,11 +143,11 @@ class ScopedCounter extends RemasteredWidget {
   }
 }
 
-final doubled = reactable(
+final doubled = ValueRx(
   () => counter.value * 2,
 );
 
-final nested = reactable(() => counter.value + doubled.value);
+final nested = ValueRx(() => counter.value + doubled.value);
 
 class DebouncedCounter extends RemasteredWidget {
   const DebouncedCounter({super.key});
@@ -194,16 +185,9 @@ Future<int> asdf() async {
   return 0;
 }
 
-final debounced = reactableStream(
+final debounced = StreamRx(
   () => counter.debounceTime(const Duration(seconds: 1)),
 );
 
 final rebounced =
-    reactableStream(() => counter.throttleTime(const Duration(seconds: 1)));
-
-final pureStream = reactable(() async* {
-  for (int i = 0; i < 1000; ++i) {
-    await Future.delayed(const Duration(seconds: 1));
-    yield i;
-  }
-});
+    StreamRx(() => counter.throttleTime(const Duration(seconds: 1)));
