@@ -6,8 +6,7 @@ class RemasteredContainer {
     this.resetAll = false,
   }) {
     this.overrides = {
-      for (final scoped in overrides)
-        scoped.originKey: scoped.scoped..scoped = true,
+      for (final rx in overrides) rx.originKey: rx.scoped..scoped = true,
     };
   }
 
