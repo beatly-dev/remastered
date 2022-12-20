@@ -3,11 +3,11 @@
 - [x]: Reactive state management
 - [x]: Reactive widget
 - [x]: Scoped reactables
+- [x]: Cacheable data
 
 ## TODO
 
 - [ ]: Reactable family
-- [ ]: Cacheable data
 - [ ]: Cached widget
 - [ ]: Widget lifecycle handler
 - [ ]: App lifecycle handler
@@ -16,3 +16,4 @@
 - [ ]: Easy listenables
 - [ ]: Easy navigation
 - [ ]: Code generator
+- [ ]: Fully test

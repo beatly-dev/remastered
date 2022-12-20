@@ -14,42 +14,42 @@ import 'container.dart';
 class RemasteredElement extends StatelessElement {
   RemasteredElement(super.widget);
 
-  static var _currentLocalReactableIndex = 0;
-  static var _currentDisposableIndex = 0;
-  static var _currentCancelableIndex = 0;
+  static int _currentLocalCacheIndex = 0;
   static RemasteredElement? _currentElement;
 
   final _globalReactables = <Reactable>[];
-  final _localReactables = <Reactable>[];
-  final _disposables = <OnDispose>[];
-  final _cancelables = <OnDispose>[];
+  final _localCache = <OnDispose>[];
   var _isFirstBuild = true;
 
   @override
-  void unmount() {
-    for (final element in _disposables) {
-      element._onDispose?.call();
-      element.value._onCleanup();
-    }
-    _disposables.clear();
+  void reassemble() {
+    _clearLocalCache();
+    super.reassemble();
+  }
 
-    for (final element in _cancelables) {
-      element._onDispose?.call();
-      element.value.cancel();
+  void _clearLocalCache() {
+    for (final elm in _localCache) {
+      elm.onDispose();
+      final value = elm.value;
+      if (value is Reactable) {
+        value._elements.remove(this);
+        value._dispose();
+      }
     }
-    _cancelables.clear();
+
+    _localCache.clear();
+  }
+
+  @override
+  void unmount() {
+    _clearLocalCache();
 
     for (final element in _globalReactables) {
       element._elements.remove(this);
       element._dispose();
     }
-    _globalReactables.clear();
 
-    for (final element in _localReactables) {
-      element._elements.remove(this);
-      element._dispose();
-    }
-    _localReactables.clear();
+    _globalReactables.clear();
 
     super.unmount();
   }
@@ -101,15 +101,11 @@ class RemasteredElement extends StatelessElement {
   }
 
   T _lockState<T>(T Function() callback) {
-    final previousReactableIndex = _currentLocalReactableIndex;
-    final previousDisposableIndex = _currentDisposableIndex;
-    final previousCancelableIndex = _currentCancelableIndex;
+    final previousLocalCacheIndex = _currentLocalCacheIndex;
     final previousElement = _currentElement;
     final previousContainer = RemasteredContainer.directContainer;
 
-    _currentLocalReactableIndex = 0;
-    _currentDisposableIndex = 0;
-    _currentCancelableIndex = 0;
+    _currentLocalCacheIndex = 0;
     _currentElement = this;
 
     final nearestContainer = RemasteredProvider.of(this);
@@ -120,9 +116,7 @@ class RemasteredElement extends StatelessElement {
 
     final result = callback();
 
-    _currentLocalReactableIndex = previousReactableIndex;
-    _currentDisposableIndex = previousDisposableIndex;
-    _currentCancelableIndex = previousCancelableIndex;
+    _currentLocalCacheIndex = previousLocalCacheIndex;
     _currentElement = previousElement;
     RemasteredContainer.directContainer = previousContainer;
 
@@ -149,12 +143,20 @@ abstract class RemasteredWidget extends StatelessWidget {
       const SizedBox.shrink();
 }
 
-class OnDispose<T> {
-  OnDispose(this.value, {void Function()? onDispose}) : _onDispose = onDispose;
+abstract class OnDispose<T> {
+  T get value;
 
-  T value;
+  void onDispose();
+}
 
-  final void Function()? _onDispose;
+class NonDisposable<T> extends OnDispose<T> {
+  NonDisposable(this.value);
+
+  @override
+  final T value;
+
+  @override
+  void onDispose() {}
 }
 
 typedef RV<T> = ReactableValue<T>;
@@ -336,7 +338,6 @@ class ReactableValue<T> extends Reactable<T, T> {
   @override
   void _onCleanup() {
     onDispose?.call(_value as T);
-    _streamController.close();
   }
 
   @override
@@ -523,15 +524,11 @@ ReactableValue<T> reactable<T>(
   void Function(T lastValue)? onDispose,
   void Function(T firstValue)? onFirstBuild,
 }) {
-  reactableBuilder() {
-    return ReactableValue<T>(
-      valueBuilder,
-      onDispose: onDispose,
-      onFirstBuild: onFirstBuild,
-    );
-  }
-
-  return _createReactable(reactableBuilder) as ReactableValue<T>;
+  return ReactableValue<T>(
+    valueBuilder,
+    onDispose: onDispose,
+    onFirstBuild: onFirstBuild,
+  );
 }
 
 ReactableFuture<T, Future<T>> reactableFuture<T>(
@@ -539,15 +536,11 @@ ReactableFuture<T, Future<T>> reactableFuture<T>(
   void Function(T lastValue)? onDispose,
   void Function(T firstValue)? onFirstBuild,
 }) {
-  reactableBuilder() {
-    return ReactableFuture<T, Future<T>>(
-      valueBuilder,
-      onDispose: onDispose,
-      onFirstBuild: onFirstBuild,
-    );
-  }
-
-  return _createReactable(reactableBuilder) as ReactableFuture<T, Future<T>>;
+  return ReactableFuture<T, Future<T>>(
+    valueBuilder,
+    onDispose: onDispose,
+    onFirstBuild: onFirstBuild,
+  );
 }
 
 ReactableStream<T, Stream<T>> reactableStream<T>(
@@ -555,96 +548,110 @@ ReactableStream<T, Stream<T>> reactableStream<T>(
   void Function(T lastValue)? onDispose,
   void Function(T firstValue)? onFirstBuild,
 }) {
-  reactableBuilder() {
-    return ReactableStream<T, Stream<T>>(
-      valueBuilder,
-      onDispose: onDispose,
-      onFirstBuild: onFirstBuild,
-    );
-  }
-
-  return _createReactable(reactableBuilder) as ReactableStream<T, Stream<T>>;
+  return ReactableStream<T, Stream<T>>(
+    valueBuilder,
+    onDispose: onDispose,
+    onFirstBuild: onFirstBuild,
+  );
 }
 
-Reactable _createReactable(
-  Reactable Function() builder,
-) {
-  if (RemasteredElement._currentElement != null) {
-    return _localReactableValue(builder);
+abstract class LazyOnDispose<T> extends OnDispose<T> {
+  LazyOnDispose(
+    this.builder,
+  );
+
+  final T Function() builder;
+
+  T? _value;
+
+  @override
+  T get value {
+    _value ??= builder();
+    return _value as T;
   }
-  return builder();
 }
 
-Reactable _localReactableValue(
-  Reactable Function() builder,
-) {
+class Disposable<T> extends OnDispose<T> {
+  Disposable(this.value)
+      : assert(
+          (value as dynamic).dispose != null,
+          'The value must have a dispose method to be used as a disposable',
+        );
+
+  @override
+  final T value;
+
+  @override
+  void onDispose() {
+    (value as dynamic)?.dispose();
+  }
+}
+
+T _findOrCreateOnDispose<T>(
+  T Function() builder, {
+  required OnDispose<T> Function(T value) create,
+}) {
   final currentElement = RemasteredElement._currentElement;
-  final currentReactables = currentElement!._localReactables;
-  if (currentElement._isFirstBuild ||
-      currentReactables.length <=
-          RemasteredElement._currentLocalReactableIndex) {
-    final reactable = builder();
-    currentReactables.add(reactable);
+  final currentCache = currentElement!._localCache;
+  final currentIndex = RemasteredElement._currentLocalCacheIndex;
+
+  OnDispose<T> _build() {
+    final initialValue = builder();
+    final onDispose = create(initialValue);
+    return onDispose;
   }
-  return currentReactables[RemasteredElement._currentLocalReactableIndex++];
+
+  if (currentElement._isFirstBuild || currentCache.length <= currentIndex) {
+    final onDispose = _build();
+    currentCache.add(onDispose);
+  }
+  if (currentCache[currentIndex].value is! T) {
+    final onDispose = _build();
+    currentCache[currentIndex] = onDispose;
+  }
+
+  return currentCache[RemasteredElement._currentLocalCacheIndex++].value as T;
+}
+
+T cached<T>(
+  T Function() builder,
+) {
+  return _findOrCreateOnDispose(
+    builder,
+    create: NonDisposable.new,
+  );
 }
 
 T disposable<T>(
-  T Function() builder, {
-  void Function(T firstValue)? onFirstBuild,
-  void Function(T lastValue)? onDispose,
-}) {
-  final currentElement = RemasteredElement._currentElement;
-  final currentDisposables = currentElement!._disposables;
-  if (!currentElement._isFirstBuild &&
-      RemasteredElement._currentDisposableIndex < currentDisposables.length) {
-    return currentDisposables[RemasteredElement._currentDisposableIndex++]
-        .value;
-  }
-  final initialValue = builder();
-  try {
-    (initialValue as dynamic).dispose;
-  } catch (e) {
-    throw Exception(
-      'The value passed to disposable must have a dispose method',
-    );
-  }
-  final value = OnDispose(
-    initialValue,
-    onDispose: () => onDispose?.call(initialValue),
+  T Function() builder,
+) {
+  return _findOrCreateOnDispose(
+    builder,
+    create: Disposable.new,
   );
-  currentDisposables.add(value);
-  onFirstBuild?.call(initialValue);
-  RemasteredElement._currentDisposableIndex++;
-  return initialValue;
+}
+
+class Cancelable<T> extends OnDispose<T> {
+  Cancelable(this.value)
+      : assert(
+          (value as dynamic).cancel != null,
+          'The value must have a cancel method to be used as a cancelable',
+        );
+
+  @override
+  final T value;
+
+  @override
+  void onDispose() {
+    (value as dynamic)?.cancel();
+  }
 }
 
 T cancelable<T>(
-  T Function() builder, {
-  void Function(T firstValue)? onFirstBuild,
-  void Function(T lastValue)? onDispose,
-}) {
-  final currentElement = RemasteredElement._currentElement;
-  final currentCancelables = currentElement!._cancelables;
-  if (!currentElement._isFirstBuild &&
-      RemasteredElement._currentCancelableIndex < currentCancelables.length) {
-    return currentCancelables[RemasteredElement._currentCancelableIndex++]
-        .value;
-  }
-  final initialValue = builder();
-  try {
-    (initialValue as dynamic).cancel;
-  } catch (e) {
-    throw Exception(
-      'The value passed to cancelable must have a cancel method',
-    );
-  }
-  final value = OnDispose(
-    initialValue,
-    onDispose: () => onDispose?.call(initialValue),
+  T Function() builder,
+) {
+  return _findOrCreateOnDispose(
+    builder,
+    create: Cancelable.new,
   );
-  currentCancelables.add(value);
-  onFirstBuild?.call(initialValue);
-  RemasteredElement._currentCancelableIndex++;
-  return initialValue;
 }
