@@ -293,7 +293,7 @@ abstract class Reactable<InnerType, WrappedType> extends Stream<InnerType> {
   @override
   String toString() => value.toString();
 
-  String get key => 'Rx$hashCode${_builder.hashCode}';
+  String get key => '$runtimeType$hashCode${_builder.hashCode}';
 }
 
 class ReactableValue<T> extends Reactable<T, T> {

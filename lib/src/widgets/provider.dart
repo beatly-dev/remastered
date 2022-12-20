@@ -63,9 +63,9 @@ class _RemasteredProviderState extends State<RemasteredProvider> {
       ),
     );
     properties.add(
-      DiagnosticsProperty(
+      IterableProperty(
         'overrides',
-        container.overrides.values,
+        container.overrides.keys.map((e) => '$e = ${container.overrides[e]}'),
       ),
     );
   }
