@@ -1,6 +1,6 @@
 name: remastered
 description: Remastering the flutter widget and state management.
-version: 0.0.1
+version: 0.0.2
 homepage: https://github.com/beatly-dev/remastered
 
 environment:
